@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #include <linux/videodev2.h>
 #include <linux/i2c.h>
 #include <linux/platform_device.h>
@@ -196,7 +209,7 @@ bool _hwPowerOnCnt(KD_REGULATOR_TYPE_T powerId, int powerVolt, char *mode_name)
 			cntVCAMA += 1;
 		else if (powerId == VCAMIO)
 			cntVCAMIO += 1;
-		else if (powerId == VCAMIO)
+		else if (powerId == VCAMAF)
 			cntVCAMAF += 1;
 		else if (powerId == SUB_VCAMD)
 			cntVCAMD_SUB += 1;

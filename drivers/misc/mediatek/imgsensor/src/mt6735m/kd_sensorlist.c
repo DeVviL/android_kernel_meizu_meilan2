@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #include <linux/videodev2.h>
 #include <linux/i2c.h>
 #include <linux/platform_device.h>
@@ -46,29 +59,12 @@
 #include <linux/regulator/consumer.h>
 #endif /* !defined(CONFIG_MTK_LEGACY) */
 
-/* sanford.lin add on 20160308 for get driver information */
-#ifdef AEON_DEVICE_PROC_MANAGER
-#include <linux/proc_fs.h>
-#define MAIN_CAM_PROC_NAME	"AEON_CAMERA0"
-#define SUB_CAM_PROC_NAME	"AEON_CAMERA1"
-#define MAIN_CAM_PROC_TUNING_VERSION	"AEON_CAMERA0_TUNING_VERSION"
-#define SUB_CAM_PROC_TUNING_VERSION	"AEON_CAMERA1_TUNING_VERSION"
-static struct proc_dir_entry *main_cam_proc_entry = NULL;
-static struct proc_dir_entry *sub_cam_proc_entry = NULL;
-static struct proc_dir_entry *main_cam_tuning_version_entry = NULL;
-static struct proc_dir_entry *sub_cam_tuning_version_entry = NULL;
-static char main_cam_name[32] = {KDIMGSENSOR_NOSENSOR};
-static char sub_cam_name[32] = {KDIMGSENSOR_NOSENSOR};
-int main_camera_tuning_version=0;
-int sub_camera_tuning_version=0;
-#endif
-/* sanford.lin end on 20160308 */
-
 /* Camera information */
 #define PROC_CAMERA_INFO "driver/camera_info"
 #define camera_info_size 128
 #define PDAF_DATA_SIZE 4096
 char mtk_ccm_name[camera_info_size] = { 0 };
+#define FEATURE_CONTROL_MAX_DATA_SIZE 128000
 
 static unsigned int gDrvIndex;
 
@@ -439,6 +435,7 @@ int iReadRegI2C(u8 *a_pSendData , u16 a_sizeSendData, u8 *a_pRecvData, u16 a_siz
 	}
 	return 0;
 }
+EXPORT_SYMBOL(iReadRegI2C);
 
 
 /*******************************************************************************
@@ -528,6 +525,7 @@ void kdSetI2CSpeed(u32 i2cSpeed)
 	}
 
 }
+EXPORT_SYMBOL(kdSetI2CSpeed);
 
 /*******************************************************************************
 * kdReleaseI2CTriggerLock
@@ -716,6 +714,7 @@ int iWriteRegI2C(u8 *a_pSendData, u16 a_sizeSendData, u16 i2cId)
 	/* KD_IMGSENSOR_PROFILE("iWriteRegI2C"); */
 	return 0;
 }
+EXPORT_SYMBOL(iWriteRegI2C);
 
 /*******************************************************************************
 * sensor function adapter
@@ -1119,12 +1118,6 @@ kdModulePowerOn(CAMERA_DUAL_CAMERA_SENSOR_ENUM socketIdx[KDIMGSENSOR_MAX_INVOKE_
 #ifndef CONFIG_FPGA_EARLY_PORTING
 			ret = kdCISModulePowerOn(socketIdx[i], sensorNameStr[i], On, mode_name);
 #endif
-			/* sanford add start on 20160127 */
-			if ((socketIdx[i] << 1) == ret)
-			{
-				return 8;
-			}
-			/* sanford add end on 20160127 */
 			if (ERROR_NONE != ret) {
 				PK_ERR("[%s]", __func__);
 				return ret;
@@ -1323,7 +1316,9 @@ int kdSensorSyncFunctionPtr(void)
 	/* if the delay frame is 0 or 0xFF, stop to count */
 	if ((g_NewSensorExpGain.uISPGainDelayFrame != 0xFF)
 	    && (g_NewSensorExpGain.uISPGainDelayFrame != 0)) {
+		spin_lock(&kdsensor_drv_lock);
 		g_NewSensorExpGain.uISPGainDelayFrame--;
+		spin_unlock(&kdsensor_drv_lock);
 	}
 	mutex_unlock(&kdCam_Mutex);
 	return 0;
@@ -1386,33 +1381,6 @@ int kdSetExpGain(CAMERA_DUAL_CAMERA_SENSOR_ENUM InvokeCamera)
 
 }
 
-/*******************************************************************************
-*
-********************************************************************************/
-static UINT32 ms_to_jiffies(MUINT32 ms)
-{
-	return ((ms * HZ + 512) >> 10);
-}
-
-
-int kdSensorSetExpGainWaitDone(int *ptime)
-{
-	int timeout;
-
-	PK_DBG("[kd_sensorlist]enter kdSensorSetExpGainWaitDone: time: %d\n", *ptime);
-	timeout = wait_event_interruptible_timeout(kd_sensor_wait_queue,
-						   (setExpGainDoneFlag & 1), ms_to_jiffies(*ptime));
-
-	PK_DBG("[kd_sensorlist]after wait_event_interruptible_timeout\n");
-	if (timeout == 0) {
-		PK_ERR("[kd_sensorlist] kdSensorSetExpGainWait: timeout=%d\n", *ptime);
-
-		return -EAGAIN;
-	}
-
-	return 0;		/* No error. */
-
-}
 
 
 
@@ -1459,181 +1427,6 @@ static inline int adopt_CAMERA_HW_Open(void)
 	return err ? -EIO : err;
 }   /* adopt_CAMERA_HW_Open() */
 
-/* sanford.lin add on 20160308 for get driver information */
-#ifdef AEON_DEVICE_PROC_MANAGER
-static ssize_t main_cam_proc_oem_read(struct file *file, char *buffer, size_t count, loff_t *ppos)
-{
-	char *page = NULL;
-    char *ptr = NULL;
-	int len, err = -1;
-
-	page = kmalloc(PAGE_SIZE, GFP_KERNEL);
-	if (!page)
-	{
-		kfree(page);
-		return -ENOMEM;
-	}
-	ptr = page;
-
-//	if (main_cam_name)
-		ptr += sprintf(ptr, "%s\n", main_cam_name);
-//	else
-//		ptr += sprintf(ptr, "unknow main camera name\n");
-
-	len = ptr - page;
-	if(*ppos >= len)
-	{
-		kfree(page);
-		return 0;
-	}
-
-	err = copy_to_user(buffer,(char *)page,len);
-	*ppos += len;
-
-	if(err)
-	{
-		kfree(page);
-		return err;
-	}
-	kfree(page);
-	return len;
-}
-
-static const struct file_operations main_cam_proc_fops = { 
-    .read = main_cam_proc_oem_read
-};
-
-static ssize_t sub_cam_proc_oem_read(struct file *file, char *buffer, size_t count, loff_t *ppos)
-{
-	char *page = NULL;
-    char *ptr = NULL;
-	int len, err = -1;
-
-	page = kmalloc(PAGE_SIZE, GFP_KERNEL);
-	if (!page)
-	{
-		kfree(page);
-		return -ENOMEM;
-	}
-	ptr = page;
-
-//	if (sub_cam_name)
-		ptr += sprintf(ptr, "%s\n", sub_cam_name);
-//	else
-//		ptr += sprintf(ptr, "unknow sub camera name\n");
-
-	len = ptr - page;
-	if(*ppos >= len)
-	{
-		kfree(page);
-		return 0;
-	}
-
-	err = copy_to_user(buffer,(char *)page,len);
-	*ppos += len;
-
-	if(err)
-	{
-		kfree(page);
-		return err;
-	}
-	kfree(page);
-	return len;
-}
-
-static const struct file_operations sub_cam_proc_fops = { 
-    .read = sub_cam_proc_oem_read
-};
-
-static ssize_t main_cam_tuning_version_read(struct file *file, char *buffer, size_t count, loff_t *ppos)
-{
-	char *page = NULL;
-	char *ptr = NULL;
-	int len, err = -1;
-	int value = main_camera_tuning_version;
-
-	page = kmalloc(PAGE_SIZE, GFP_KERNEL);
-	if (!page)
-	{
-		kfree(page);
-		return -ENOMEM;
-	}
-	ptr = page;
-
-//	if (main_cam_name)
-		ptr += sprintf(ptr, "%x\n", value);
-//	else
-//		ptr += sprintf(ptr, "unknow main camera version\n");	
-
-	len = ptr - page;
-	if(*ppos >= len)
-	{
-		kfree(page);
-		return 0;
-	}
-
-	err = copy_to_user(buffer,(char *)page,len);
-	*ppos += len;
-
-	if(err)
-	{
-		kfree(page);
-		return err;
-	}
-	kfree(page);
-	return len;     
-}
-
-static const struct file_operations main_cam_tuning_version_fops = { 
-    .read = main_cam_tuning_version_read
-};
-
-static ssize_t sub_cam_tuning_version_read(struct file *file, char *buffer, size_t count, loff_t *ppos)
-{
-	char *page = NULL;
-	char *ptr = NULL;
-	int len, err = -1;
-	int value = sub_camera_tuning_version;
-
-	page = kmalloc(PAGE_SIZE, GFP_KERNEL);
-	if (!page)
-	{
-		kfree(page);
-		return -ENOMEM;
-	}
-	ptr = page;
-
-//	if (sub_cam_name)
-		ptr += sprintf(ptr, "%x\n", value);
-//	else
-//		ptr += sprintf(ptr, "unknow sub camera version\n");
-
-	len = ptr - page;
-	if(*ppos >= len)
-	{
-		kfree(page);
-		return 0;
-	}
-
-	err = copy_to_user(buffer,(char *)page,len);
-	*ppos += len;
-
-	if(err)
-	{
-		kfree(page);
-		return err;
-	}
-	kfree(page);
-	return len;     
-}
-
-static const struct file_operations sub_cam_tuning_version_fops = { 
-    .read = sub_cam_tuning_version_read
-};
-
-#endif
-/* sanford.lin end on 20160308 */
-
 /*******************************************************************************
 * adopt_CAMERA_HW_CheckIsAlive
 ********************************************************************************/
@@ -1644,18 +1437,11 @@ static inline int adopt_CAMERA_HW_CheckIsAlive(void)
 	UINT32 i = 0;
 	MUINT32 sensorID = 0;
 	MUINT32 retLen = 0;
-    MINT32 ret = ERROR_NONE; //sanford.lin
 
 	KD_IMGSENSOR_PROFILE_INIT();
 	/* power on sensor */
-	/* sanford add start on 20160127 */
-	ret = kdModulePowerOn((CAMERA_DUAL_CAMERA_SENSOR_ENUM *) g_invokeSocketIdx, g_invokeSensorNameStr, true, CAMERA_HW_DRVNAME1);
-    if (8 == ret)
-    {
-        err = ERROR_SENSOR_CONNECT_FAIL;
-        return err ?  -EIO:err;
-    }
-    /* sanford add end on 20160127 */
+	kdModulePowerOn((CAMERA_DUAL_CAMERA_SENSOR_ENUM *) g_invokeSocketIdx, g_invokeSensorNameStr,
+			true, CAMERA_HW_DRVNAME1);
 	/* wait for power stable */
 	mDELAY(10);
 	KD_IMGSENSOR_PROFILE("kdModulePowerOn");
@@ -1687,18 +1473,10 @@ static inline int adopt_CAMERA_HW_CheckIsAlive(void)
 				} else {
 
 					PK_DBG(" Sensor found ID = 0x%x\n", sensorID);
-					snprintf(mtk_ccm_name, sizeof(mtk_ccm_name),
-						 "%s CAM[%d]:%s;", mtk_ccm_name,
-						 g_invokeSocketIdx[i], g_invokeSensorNameStr[i]);
+					snprintf(mtk_ccm_name + strlen(mtk_ccm_name),
+						 sizeof(mtk_ccm_name) - strlen(mtk_ccm_name),
+						 " CAM[%d]:%s;", g_invokeSocketIdx[i], g_invokeSensorNameStr[i]);
 					err = ERROR_NONE;
-				/* sanford.lin add on 20160308 for get driver information */
-				#ifdef AEON_DEVICE_PROC_MANAGER
-					if (DUAL_CAMERA_MAIN_SENSOR == g_invokeSocketIdx[i])
-						strcpy(main_cam_name,g_invokeSensorNameStr[i]);
-					else if (DUAL_CAMERA_SUB_SENSOR == g_invokeSocketIdx[i])
-						strcpy(sub_cam_name,g_invokeSensorNameStr[i]);
-				#endif
-				/* sanford.lin end on 20160308 */
 				}
 				if (ERROR_NONE != err) {
 					PK_DBG
@@ -1711,7 +1489,8 @@ static inline int adopt_CAMERA_HW_CheckIsAlive(void)
 	}
 
 	/* reset sensor state after power off */
-	err1 = g_pSensorFunc->SensorClose();
+    if (g_pSensorFunc)
+	    err1 = g_pSensorFunc->SensorClose();
 	if (ERROR_NONE != err1) {
 		PK_DBG("SensorClose\n");
 	}
@@ -1837,22 +1616,24 @@ MSDK_SENSOR_INFO_STRUCT ginfo1[2];
 MSDK_SENSOR_INFO_STRUCT ginfo2[2];
 MSDK_SENSOR_INFO_STRUCT ginfo3[2];
 MSDK_SENSOR_INFO_STRUCT ginfo4[2];
+MSDK_SENSOR_INFO_STRUCT *pInfo[2];
+MSDK_SENSOR_CONFIG_STRUCT config[2], *pConfig[2];
+MSDK_SENSOR_INFO_STRUCT *pInfo1[2];
+MSDK_SENSOR_CONFIG_STRUCT config1[2], *pConfig1[2];
+MSDK_SENSOR_INFO_STRUCT *pInfo2[2];
+MSDK_SENSOR_CONFIG_STRUCT config2[2], *pConfig2[2];
+MSDK_SENSOR_INFO_STRUCT *pInfo3[2];
+MSDK_SENSOR_CONFIG_STRUCT config3[2], *pConfig3[2];
+MSDK_SENSOR_INFO_STRUCT *pInfo4[2];
+MSDK_SENSOR_CONFIG_STRUCT config4[2], *pConfig4[2];
+
 /* adopt_CAMERA_HW_GetInfo() */
 inline static int adopt_CAMERA_HW_GetInfo2(void *pBuf)
 {
 	IMAGESENSOR_GETINFO_STRUCT *pSensorGetInfo = (IMAGESENSOR_GETINFO_STRUCT *) pBuf;
 	ACDK_SENSOR_INFO2_STRUCT SensorInfo = { 0 };
 	MUINT32 IDNum = 0;
-	MSDK_SENSOR_INFO_STRUCT *pInfo[2];
-	MSDK_SENSOR_CONFIG_STRUCT config[2], *pConfig[2];
-	MSDK_SENSOR_INFO_STRUCT *pInfo1[2];
-	MSDK_SENSOR_CONFIG_STRUCT config1[2], *pConfig1[2];
-	MSDK_SENSOR_INFO_STRUCT *pInfo2[2];
-	MSDK_SENSOR_CONFIG_STRUCT config2[2], *pConfig2[2];
-	MSDK_SENSOR_INFO_STRUCT *pInfo3[2];
-	MSDK_SENSOR_CONFIG_STRUCT config3[2], *pConfig3[2];
-	MSDK_SENSOR_INFO_STRUCT *pInfo4[2];
-	MSDK_SENSOR_CONFIG_STRUCT config4[2], *pConfig4[2];
+
 	MSDK_SENSOR_RESOLUTION_INFO_STRUCT SensorResolution[2], *psensorResolution[2];
 
 	MUINT32 ScenarioId[2], *pScenarioId[2];
@@ -2166,6 +1947,11 @@ static inline int  adopt_CAMERA_HW_FeatureControl(void *pBuf)
 		PK_ERR(" ioctl copy from user failed\n");
 		return -EFAULT;
 	}
+	/* data size exam */
+	if (FeatureParaLen > FEATURE_CONTROL_MAX_DATA_SIZE) {
+		PK_ERR(" exceed data size limitation\n");
+		return -EFAULT;
+	}
 
 	pFeaturePara = kmalloc(FeatureParaLen, GFP_KERNEL);
 	if (NULL == pFeaturePara) {
@@ -2238,6 +2024,7 @@ static inline int  adopt_CAMERA_HW_FeatureControl(void *pBuf)
 		if (copy_from_user
 		    ((void *)pFeaturePara, (void *)pFeatureCtrl->pFeaturePara, FeatureParaLen)) {
 			PK_DBG("[CAMERA_HW][pFeaturePara] ioctl copy from user failed\n");
+			kfree(pFeaturePara);
 			return -EFAULT;
 		}
 		/* keep the information to wait Vsync synchronize */
@@ -2252,6 +2039,7 @@ static inline int  adopt_CAMERA_HW_FeatureControl(void *pBuf)
 		g_NewSensorExpGain.uSensorExpDelayFrame = pSensorSyncInfo->uSensorExpDelayFrame;
 		g_NewSensorExpGain.uSensorGainDelayFrame = pSensorSyncInfo->uSensorGainDelayFrame;
 		g_NewSensorExpGain.uISPGainDelayFrame = pSensorSyncInfo->uISPGainDelayFrame;
+		spin_unlock(&kdsensor_drv_lock);
 		/* AE smooth not change shutter to speed up */
 		if ((0 == g_NewSensorExpGain.u2SensorNewExpTime)
 		    || (0xFFFF == g_NewSensorExpGain.u2SensorNewExpTime)) {
@@ -2284,7 +2072,9 @@ static inline int  adopt_CAMERA_HW_FeatureControl(void *pBuf)
 		/* if the delay frame is 0 or 0xFF, stop to count */
 		if ((g_NewSensorExpGain.uISPGainDelayFrame != 0xFF)
 		    && (g_NewSensorExpGain.uISPGainDelayFrame != 0)) {
+			spin_lock(&kdsensor_drv_lock);
 			g_NewSensorExpGain.uISPGainDelayFrame--;
+			spin_unlock(&kdsensor_drv_lock);
 		}
 
 
@@ -3155,6 +2945,7 @@ bool _hwPowerOn(KD_REGULATOR_TYPE_T type, int powerVolt)
 
 	return ret;
 }
+EXPORT_SYMBOL(_hwPowerOn);
 
 bool _hwPowerDown(KD_REGULATOR_TYPE_T type)
 {
@@ -3187,6 +2978,7 @@ bool _hwPowerDown(KD_REGULATOR_TYPE_T type)
 	}
 	return ret;
 }
+EXPORT_SYMBOL(_hwPowerDown);
 #endif
 
 #ifdef CONFIG_COMPAT
@@ -3621,7 +3413,6 @@ static long CAMERA_HW_Ioctl(struct file *a_pstFile,
 		break;
 
 	case KDIMGSENSORIOC_X_SET_SHUTTER_GAIN_WAIT_DONE:
-		i4RetValue = kdSensorSetExpGainWaitDone((int *)pBuff);
 		break;
 
 	case KDIMGSENSORIOC_X_SET_CURRENT_SENSOR:
@@ -3837,21 +3628,6 @@ static int CAMERA_HW_i2c_probe(struct i2c_client *client, const struct i2c_devic
 
 	spin_unlock(&kdsensor_drv_lock);
 
-/* sanford.lin add on 20160308 for get driver information */
-#ifdef AEON_DEVICE_PROC_MANAGER
-	main_cam_proc_entry = proc_create(MAIN_CAM_PROC_NAME, 0777, NULL, &main_cam_proc_fops);
-	if (NULL == main_cam_proc_entry)
-	{
-		printk("proc_create %s failed\n", MAIN_CAM_PROC_NAME);
-	}
-	main_cam_tuning_version_entry = proc_create(MAIN_CAM_PROC_TUNING_VERSION, 0777, NULL, &main_cam_tuning_version_fops);    
-	if (NULL == main_cam_tuning_version_entry)
-	{
-		printk("proc_create %s failed\n", MAIN_CAM_PROC_TUNING_VERSION);
-	}
-#endif
-/* sanford.lin end on 20160308 */
-
 	/* Register char driver */
 	i4RetValue = RegisterCAMERA_HWCharDrv();
 
@@ -4050,21 +3826,6 @@ static int CAMERA_HW_i2c_probe2(struct i2c_client *client, const struct i2c_devi
 	g_pstI2Cclient2->timing = 100;	/* 100k */
 	g_pstI2Cclient2->ext_flag &= ~I2C_POLLING_FLAG;	/* No I2C polling busy waiting */
 	spin_unlock(&kdsensor_drv_lock);
-
-/* sanford.lin add on 20160308 for get driver information */
-#ifdef AEON_DEVICE_PROC_MANAGER
-	sub_cam_proc_entry = proc_create(SUB_CAM_PROC_NAME, 0777, NULL, &sub_cam_proc_fops);
-	if (NULL == sub_cam_proc_entry)
-	{
-		printk("proc_create %s failed\n", SUB_CAM_PROC_NAME);
-	}
-	sub_cam_tuning_version_entry = proc_create(SUB_CAM_PROC_TUNING_VERSION, 0777, NULL, &sub_cam_tuning_version_fops);
-	if (NULL == sub_cam_tuning_version_entry)
-	{
-		printk("proc_create %s failed\n", SUB_CAM_PROC_TUNING_VERSION);
-	} 			
-#endif
-/* sanford.lin end on 20160308 */
 
 	/* Register char driver */
 	i4RetValue = RegisterCAMERA_HWCharDrv2();
@@ -4425,7 +4186,7 @@ static ssize_t CAMERA_HW_Reg_Debug(struct file *file, const char *buffer, size_t
 		}
 	} else
 	    if (sscanf
-		(regBuf, "%s %s %d %x", debugSensor.debugStruct, debugSensor.debugSubstruct,
+		(regBuf, "%31s %31s %d %x", debugSensor.debugStruct, debugSensor.debugSubstruct,
 		 &debugSensor.isGet, &debugSensor.value) == 4) {
 		if (g_pSensorFunc != NULL) {
 			g_pSensorFunc->SensorFeatureControl(DUAL_CAMERA_MAIN_SENSOR,
