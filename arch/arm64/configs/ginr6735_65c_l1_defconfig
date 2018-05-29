@@ -1296,10 +1296,7 @@ CONFIG_MTK_GPU_COMMON_DVFS_SUPPORT=y
 CONFIG_MTK_MMPROFILE_SUPPORT=y
 CONFIG_MMPROFILE=y
 CONFIG_MTK_LCM=y
-#wenggaojian@wind-mobi.com begin
-#DS: CONFIG_CUSTOM_KERNEL_LCM="ili9881_CA_hd720_dsi_vdo_yassy otm1285a_hd720_dsi_vdo_tm otm1285a_hd720_dsi_vdo_by"
-CONFIG_CUSTOM_KERNEL_LCM="otm1285a_hd720_dsi_vdo_by"
-#wenggaojian@wind-mobi.com end
+CONFIG_CUSTOM_KERNEL_LCM="otm1285a_hd720_dsi_vdo_by otm1285a_hd720_dsi_vdo_tm ili9881_CA_hd720_dsi_vdo_yassy"
 # CONFIG_MTK_LCM_DEVICE_TREE_SUPPORT is not set
 CONFIG_MTK_FB=y
 CONFIG_MTK_VIDEOX=y
